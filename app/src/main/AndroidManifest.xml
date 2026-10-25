@@ -50,5 +50,16 @@
                 <action android:name="mitv.action.STR_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- Boot-start via system-bound accessibility service: survives the
+             shutdown stopped-marking that blocks BOOT_COMPLETED and carries a
+             background-activity-launch exemption without needing appops. -->
+        <service android:name=".BootAccessibilityService" android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                android:resource="@xml/boot_accessibility_config" />
+        </service>
     </application>
 </manifest>
