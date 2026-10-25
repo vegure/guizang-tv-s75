@@ -52,8 +52,11 @@
         </receiver>
         <!-- Boot-start via system-bound accessibility service: survives the
              shutdown stopped-marking that blocks BOOT_COMPLETED and carries a
-             background-activity-launch exemption without needing appops. -->
+             background-activity-launch exemption without needing appops.
+             directBootAware makes the system bind it before user unlock, ahead
+             of the firmware's enablement revert. -->
         <service android:name=".BootAccessibilityService" android:exported="true"
+            android:directBootAware="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
