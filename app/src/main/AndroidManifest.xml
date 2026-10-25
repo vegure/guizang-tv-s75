@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <queries>
@@ -38,5 +40,15 @@
                 <category android:name="android.intent.category.INFO" />
             </intent-filter>
         </activity>
+        <!-- Direct boot fallback for firmware whose launcher hook runs before
+             user unlock (MiTV-MFTR0 / OS3.0.106). Gated by the same switch as
+             BootGateActivity; needs SYSTEM_ALERT_WINDOW appop for background
+             activity launch on Android 10+. -->
+        <receiver android:name=".BootCompletedReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="mitv.action.STR_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
