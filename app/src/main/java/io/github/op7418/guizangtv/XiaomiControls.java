@@ -8,15 +8,15 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.provider.Settings;
 
-/** Local profile verified on MiTV-MTSU0, OS3.0.119.0.UTSMATV. */
+/** Verified models: MiTV-MTSU0 (OS3.0.119.0.UTSMATV), MiTV-MFTR0 (OS3.0.106.0.UFTMATV). */
 final class XiaomiControls {
     private XiaomiControls() { }
 
     static boolean enabled() {
-        return "MiTV-MTSU0".equals(Build.MODEL);
+        return "MiTV-MTSU0".equals(Build.MODEL) || "MiTV-MFTR0".equals(Build.MODEL);
     }
 
-    /** Observed on this firmware: source 23 = HDMI 1, source 24 = HDMI 2. */
+    /** Observed on MiTV-MTSU0 firmware: source 23 = HDMI 1, source 24 = HDMI 2. */
     static boolean openHdmi(Context context, int port) {
         if (!enabled() || port < 1 || port > 2) return false;
         ComponentName target = new ComponentName("com.xiaomi.mitv.tvplayer",
