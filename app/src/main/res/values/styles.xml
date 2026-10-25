@@ -6,4 +6,5 @@
         <item name="android:fontFamily">sans-serif</item>
     </style>
     <string name="app_name">归藏电视</string>
+    <string name="boot_a11y_desc">开机自动进入归藏电视：监听桌面出现后自动打开一次（实验）。不读取屏幕内容。</string>
 </resources>
