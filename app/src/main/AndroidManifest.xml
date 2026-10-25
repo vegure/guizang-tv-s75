@@ -32,29 +32,23 @@
         </activity>
         <!-- Xiaomi's package-based startup hook resolves INFO before LAUNCHER.
              Ordinary TV app-list entries still open FrameHomeActivity directly. -->
-        <activity android:name=".BootGateActivity" android:exported="true"
+        <activity android:name=".BootGateActivity" android:exported="true" android:directBootAware="true"
             android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity=""
-            android:theme="@android:style/Theme.NoDisplay">
+            android:theme="@style/Theme.GuiZangTV">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.INFO" />
             </intent-filter>
         </activity>
-        <!-- Direct boot fallback for firmware whose launcher hook runs before
-             user unlock (MiTV-MFTR0 / OS3.0.106). Gated by the same switch as
-             BootGateActivity; needs SYSTEM_ALERT_WINDOW appop for background
-             activity launch on Android 10+. -->
-        <receiver android:name=".BootCompletedReceiver" android:exported="true">
+        <!-- Best-effort full-boot fallback. BOOT_COMPLETED is system-protected;
+             the receiver does not accept vendor or externally forged wake events. -->
+        <receiver android:name=".BootCompletedReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="mitv.action.STR_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <!-- Boot-start via system-bound accessibility service: survives the
-             shutdown stopped-marking that blocks BOOT_COMPLETED and carries a
-             background-activity-launch exemption without needing appops.
-             directBootAware makes the system bind it before user unlock, ahead
-             of the firmware's enablement revert. -->
+        <!-- Optional system-bound boot fallback. Firmware may reset its enabled
+             state; no system component is disabled to keep this service enabled. -->
         <service android:name=".BootAccessibilityService" android:exported="true"
             android:directBootAware="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
