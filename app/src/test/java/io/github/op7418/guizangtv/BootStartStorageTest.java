@@ -1,6 +1,8 @@
 package io.github.op7418.guizangtv;
 
 import android.content.Context;
+import android.provider.Settings;
+import org.robolectric.shadows.ShadowBuild;
 import android.content.SharedPreferences;
 import android.os.UserManager;
 import org.junit.Before;
@@ -25,6 +27,8 @@ public class BootStartStorageTest {
         ce = context.getSharedPreferences("boot-start", Context.MODE_PRIVATE);
         de = context.createDeviceProtectedStorageContext()
                 .getSharedPreferences("boot-start", Context.MODE_PRIVATE);
+        ShadowBuild.setModel("MiTV-MFTR0");
+        Settings.Global.putInt(context.getContentResolver(), Settings.Global.BOOT_COUNT, 20);
         ce.edit().clear().commit();
         de.edit().clear().commit();
     }
