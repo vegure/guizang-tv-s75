@@ -16,31 +16,28 @@ import android.view.accessibility.AccessibilityEvent;
  * Boot-start via accessibility binding. The S75 firmware (OS3.0.106) marks
  * every third-party package stopped during shutdown, so BOOT_COMPLETED is
  * never delivered and appops grants are reset; an enabled accessibility
- * service is bound by the system instead, which sidesteps both defenses and
- * carries a background-activity-launch exemption.
+ * service is bound by the system instead (directBootAware, before user
+ * unlock), which un-stops the package in time for the BOOT_COMPLETED
+ * broadcast too - both channels fire.
  *
- * This firmware has no accessibility settings UI for third-party services
- * and later reverts adb-written enablement, so the binding window is short:
- * win the race by binding early (directBootAware) and launching immediately
- * once the user is unlocked, before the enablement is reverted and the
- * still-empty process is killed. Once FrameHomeActivity is foreground the
- * process survives the later unbind.
- *
- * Triggers, both once-only and gated by the in-app switch:
- * 1. Cold boot: stock launcher window first appears in a new boot cycle
- *    (bookkept via Settings.Global.BOOT_COUNT, shared with BootGateActivity).
- * 2. Standby wake: launcher window appears shortly after ACTION_SCREEN_ON.
- *    A plain HOME press (screen already on) never fires.
+ * Triggers, once-only and gated by the in-app switch:
+ * 1. Cold boot: stock launcher window first appears in a new boot cycle.
+ * 2. Standby wake: this firmware always re-fronts the stock launcher on wake
+ *    (even over a live foreground app), so watching for window changes is
+ *    unreliable - instead, on ACTION_SCREEN_ON, re-open the desktop when the
+ *    foreground before standby was the launcher or ourselves. Waking back
+ *    into another app (e.g. a video player) is never hijacked. A plain HOME
+ *    press (screen stays on) never fires.
  */
 public class BootAccessibilityService extends AccessibilityService {
     private static final String PREFS = "boot-start";
     private static final String STOCK_HOME = "com.mitv.tvhome";
-    private static final long WAKE_WINDOW_MS = 12_000;
-    private static final long SETTLE_MS = 800;
+    private static final long WAKE_DELAY_MS = 4_000;
     private static final long UNLOCK_TIMEOUT_MS = 30_000;
 
     private boolean handledBoot = false;
-    private long screenOnAt = 0L;
+    private String lastForegroundPkg = null;
+    private String foregroundAtScreenOff = null;
     private long handledScreenOnAt = -1L;
     private BroadcastReceiver screenReceiver;
 
@@ -63,12 +60,18 @@ public class BootAccessibilityService extends AccessibilityService {
         screenReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
-                    screenOnAt = SystemClock.elapsedRealtime();
+                String action = intent.getAction();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    foregroundAtScreenOff = lastForegroundPkg;
+                } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                    onScreenOn(SystemClock.elapsedRealtime());
                 }
             }
         };
-        registerReceiver(screenReceiver, new IntentFilter(Intent.ACTION_SCREEN_ON));
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, filter);
     }
 
     @Override
@@ -83,9 +86,12 @@ public class BootAccessibilityService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-        CharSequence pkg = event.getPackageName();
-        if (pkg == null || !STOCK_HOME.contentEquals(pkg)) return;
+        CharSequence seq = event.getPackageName();
+        if (seq == null) return;
+        String pkg = seq.toString();
+        if (!getPackageName().equals(pkg)) lastForegroundPkg = pkg;
 
+        if (!STOCK_HOME.equals(pkg)) return;
         SharedPreferences prefs = prefs();
         if (!prefs.getBoolean("enabled", false)) return;
 
@@ -96,16 +102,47 @@ public class BootAccessibilityService extends AccessibilityService {
             if (boot >= 0 && prefs.getInt("attempted", -1) != boot) {
                 saveAttempted(prefs, boot);
                 launch("开机周期 " + boot);
-                return;
             }
         }
+    }
 
-        long now = SystemClock.elapsedRealtime();
-        if (screenOnAt > 0 && handledScreenOnAt != screenOnAt
-                && now >= screenOnAt && now - screenOnAt <= WAKE_WINDOW_MS) {
-            handledScreenOnAt = screenOnAt;
-            launch("待机唤醒");
-        }
+    private void onScreenOn(long at) {
+        final SharedPreferences prefs = prefs();
+        if (!prefs.getBoolean("enabled", false)) return;
+        if (handledScreenOnAt == at) return;
+        final String resumeFrom = foregroundAtScreenOff;
+        // Only when the pre-standby foreground was the launcher or ourselves;
+        // never hijack waking back into another app.
+        if (resumeFrom != null && !STOCK_HOME.equals(resumeFrom)
+                && !getPackageName().equals(resumeFrom)) return;
+        handledScreenOnAt = at;
+        final long screenOnAt = at;
+        new Thread(() -> {
+            try {
+                SystemClock.sleep(WAKE_DELAY_MS);
+                // If another app took the screen after wake, leave it alone.
+                String nowPkg = lastForegroundPkg;
+                if (nowPkg != null && !STOCK_HOME.equals(nowPkg)
+                        && !getPackageName().equals(nowPkg)) {
+                    Log.i("GuiZangBoot", "唤醒后已有其他前台：" + nowPkg + "，跳过");
+                    return;
+                }
+                if (!prefs().getBoolean("enabled", false)) return;
+                UserManager um = (UserManager) getSystemService(USER_SERVICE);
+                long deadline = SystemClock.elapsedRealtime() + UNLOCK_TIMEOUT_MS;
+                while (um != null && !um.isUserUnlocked()
+                        && SystemClock.elapsedRealtime() < deadline) {
+                    SystemClock.sleep(300);
+                }
+                Intent launchIntent = new Intent(getApplicationContext(), FrameHomeActivity.class)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(launchIntent);
+                Log.i("GuiZangBoot", "唤醒直接启动完成（待机前前台："
+                        + (resumeFrom == null ? "未知" : resumeFrom) + "）");
+            } catch (RuntimeException error) {
+                Log.w("GuiZangBoot", "唤醒直接启动失败：" + error.getClass().getSimpleName());
+            }
+        }).start();
     }
 
     private void saveAttempted(SharedPreferences prefs, int boot) {
@@ -123,12 +160,10 @@ public class BootAccessibilityService extends AccessibilityService {
             try {
                 UserManager um = (UserManager) getSystemService(USER_SERVICE);
                 long deadline = SystemClock.elapsedRealtime() + UNLOCK_TIMEOUT_MS;
-                while (!um.isUserUnlocked()
+                while (um != null && !um.isUserUnlocked()
                         && SystemClock.elapsedRealtime() < deadline) {
                     SystemClock.sleep(300);
                 }
-                // Minimal settle so the freshly shown launcher finishes drawing.
-                SystemClock.sleep(SETTLE_MS);
                 Intent launchIntent = new Intent(getApplicationContext(), FrameHomeActivity.class)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                 startActivity(launchIntent);
