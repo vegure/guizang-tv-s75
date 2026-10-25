@@ -9,7 +9,7 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.accessibilityAccessibilityEvent;
+import android.view.accessibility.AccessibilityEvent;
 
 /**
  * Boot-start via accessibility binding. The S75 firmware (OS3.0.106) marks
@@ -29,7 +29,6 @@ import android.view.accessibilityAccessibilityEvent;
  */
 public class BootAccessibilityService extends AccessibilityService {
     private static final String PREFS = "boot-start";
-    private static final String EXTRA = "guizang.boot-count";
     private static final String STOCK_HOME = "com.mitv.tvhome";
     private static final long WAKE_WINDOW_MS = 12_000;
     private static final long SETTLE_DELAY_MS = 3_000;
