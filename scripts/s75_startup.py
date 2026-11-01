@@ -165,8 +165,8 @@ def apply(adb, args):
                 selected_settings=[record['namespace'] + '.' + record['key'] for record in records],
                 skip_device_customization=args.skip_device_customization,
                 experimental_standby=args.experimental_standby,
-                effect='设置写入并读回一致；电视实际开机与待机效果未验证。'
-                       + ('已选择实验待机选项：仅有其他机型证据，会影响第三方应用清理。'
+                effect='设置写入并读回一致；本次写入后的实际开机与待机效果仍需验证。'
+                       + ('已选择实验待机选项：OS3.0.106 已有普通待机短测记录，本次设备效果仍需验证；全局影响第三方清理，STR/长期待机未验证。'
                           if args.experimental_standby else '未选择实验待机选项。'))
 
 
@@ -259,7 +259,7 @@ def main(argv=None):
     write.add_argument('--skip-device-customization', action='store_true',
                        help='Opt in: System mitv_device_customize_skip=true (device customization sync)')
     write.add_argument('--experimental-standby', action='store_true',
-                       help='Opt in: Global disable_back_home_whitelist=disable (S75 effect unverified)')
+                       help='Opt in: Global disable_back_home_whitelist=disable (OS3.0.106 short-standby record; verify this device; global third-party cleanup effect; STR/long standby unverified)')
     args = parser.parse_args(argv)
     try:
         adb = Adb(args.serial)
