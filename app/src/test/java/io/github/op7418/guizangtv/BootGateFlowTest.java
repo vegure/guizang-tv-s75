@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.UserManager;
 import android.provider.Settings;
 import java.time.Duration;
@@ -57,6 +58,29 @@ public class BootGateFlowTest {
         assertEquals(20, request.getIntExtra("guizang.boot-count", -1));
         assertNull(shadowOf(gate).getNextStartedActivity());
         assertFalse(prefs.getString("status", "").contains("已在本次开机后进入桌面"));
+    }
+
+    @Test public void screenWakeCanReenterFromForegroundHookAfterThisBootWasConfirmed() {
+        prefs.edit().putInt("attempted", 20).putInt("confirmed", 20).commit();
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", context.getPackageName());
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofHours(3));
+        PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        shadowOf(power).setIsScreenOn(false);
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));
+        shadowOf(Looper.getMainLooper()).idle();
+        shadowOf(power).setIsScreenOn(true);
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        shadowOf(Looper.getMainLooper()).idle();
+        assertTrue(power.isInteractive());
+
+        Activity gate = Robolectric.buildActivity(BootGateActivity.class).create().start().resume().get();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+
+        Intent request = shadowOf(gate).getNextStartedActivity();
+        assertNotNull("A real screen wake must reenter from the visible system hook even after boot confirmation", request);
+        assertEquals(FrameHomeActivity.class.getName(), request.getComponent().getClassName());
+        assertEquals(20, prefs.getInt("attempted", -1));
+        assertEquals(20, prefs.getInt("confirmed", -1));
     }
 
     @Test public void credentialOnlyUpgradeWaitsForUnlockBeforeReadingChoice() {

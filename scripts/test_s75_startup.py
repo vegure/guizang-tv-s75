@@ -160,6 +160,17 @@ class S75StartupTest(unittest.TestCase):
         self.assertEqual(1, len(self.writes()))
         self.assertEqual(['system.start_3rd_app'], json.loads(result.stdout)['selected_settings'])
 
+    def test_wake_verification_package_can_restore_the_existing_trial_target(self):
+        self.save({'system': {'start_3rd_app': PACKAGE, 'mitv_device_customize_skip': 'true'},
+                   'global': {'disable_back_home_whitelist': 'disable'}})
+        original = self.load()
+        result = self.run_tool('apply', '--package', 'io.github.op7418.guizangtv.s75wake',
+                               '--backup', str(self.backup))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual('io.github.op7418.guizangtv.s75wake', self.load()['system']['start_3rd_app'])
+        self.assertEqual(0, self.restore().returncode)
+        self.assertEqual(original, self.load())
+
     def test_existing_backup_cannot_be_overwritten_or_cause_writes(self):
         self.backup.write_text('keep me')
         result = self.apply()
