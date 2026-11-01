@@ -28,9 +28,13 @@ android {
             if (System.getenv('GUIZANG_KEYSTORE')) signingConfig signingConfigs.release
         }
     }
+    testOptions { unitTests.includeAndroidResources = true }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
 }
-dependencies { testImplementation 'junit:junit:4.13.2' }
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+}
