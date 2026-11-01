@@ -10,7 +10,8 @@ import subprocess
 import sys
 import tempfile
 
-PACKAGES = ('io.github.op7418.guizangtv', 'io.github.op7418.guizangtv.s75test')
+PACKAGES = ('io.github.op7418.guizangtv', 'io.github.op7418.guizangtv.s75test',
+            'io.github.op7418.guizangtv.s75wake')
 KEYS = (('system', 'start_3rd_app'), ('system', 'mitv_device_customize_skip'),
         ('global', 'disable_back_home_whitelist'))
 TIMEOUT = 15
@@ -61,7 +62,7 @@ class Adb:
 
     def installed(self, package):
         if package not in PACKAGES:
-            raise ToolError('Only the GuiZang release or S75 verification package is supported')
+            raise ToolError('Only the GuiZang release or S75 verification packages are supported')
         if not self.command('pm', 'path', package).startswith('package:'):
             raise ToolError('The selected GuiZang package is not installed')
 

@@ -7,14 +7,17 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.SystemClock;
 import android.os.UserManager;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 
-/** Opt-in, once-per-full-boot launch. Never handles screen-on, HDMI or Home keys. */
+/** Opt-in full-boot launch and bounded screen-wake recovery through a foreground hook. */
 public final class BootStart {
     private static final String PREFS = "boot-start";
     private static final String EXTRA = "guizang.boot-count";
+    private static final String WAKE_EXTRA = "guizang.wake-at";
+    private static final String WAKE_BOOT_EXTRA = "guizang.wake-boot";
     // Every boot entry runs in the same process and uses this one DE store.
     private static synchronized SharedPreferences prefs(Context c) {
         SharedPreferences de = c.createDeviceProtectedStorageContext()
@@ -67,6 +70,44 @@ public final class BootStart {
             Log.w("GuiZangBoot", c.getPackageName() + " source=" + source + " boot=" + boot + " Launch rejected", error);
         }
     }
+    private static GuiZangApplication application(Context c) {
+        Context app = c.getApplicationContext();
+        return app instanceof GuiZangApplication ? (GuiZangApplication) app : null;
+    }
+    static void cancelWake(Context c) {
+        GuiZangApplication app = application(c);
+        if (app != null) app.cancelWake();
+    }
+    static boolean wakeReady(Context c) {
+        PowerManager power = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+        return XiaomiControls.enabled() && enabled(c) && configured(c) && unlocked(c)
+                && power != null && power.isInteractive() && bootCount(c) >= 0;
+    }
+    static synchronized boolean enterWake(Context c) {
+        if (!wakeReady(c)) { cancelWake(c); return false; }
+        GuiZangApplication app = application(c);
+        long at = app == null ? -1 : app.takeWake();
+        if (at < 0) return false;
+        int boot = bootCount(c);
+        SharedPreferences state = prefs(c);
+        if (!state.edit().putLong("wake-attempted", at).putInt("wake-boot", boot)
+                .putString("wake-source", "system-wake-hook")
+                .putString("wake-status", "已发送待机恢复请求，等待界面确认").commit()) return false;
+        try {
+            c.startActivity(new Intent(c, FrameHomeActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra(WAKE_EXTRA, at).putExtra(WAKE_BOOT_EXTRA, boot));
+            Log.i("GuiZangBoot", c.getPackageName() + " source=system-wake-hook boot=" + boot
+                    + " wake=" + at + " 已发送待机恢复请求");
+            return true;
+        } catch (RuntimeException error) {
+            state.edit().remove("wake-attempted")
+                    .putString("wake-status", "待机恢复失败：" + error.getClass().getSimpleName()).commit();
+            Log.w("GuiZangBoot", c.getPackageName() + " source=system-wake-hook boot=" + boot
+                    + " wake=" + at + " Launch rejected", error);
+            return false;
+        }
+    }
     private static boolean configured(Context c) {
         return c.getPackageName().equals(Settings.System.getString(c.getContentResolver(), "start_3rd_app"));
     }
@@ -77,6 +118,18 @@ public final class BootStart {
     }
     static void confirm(Activity activity) {
         Intent intent = activity.getIntent();
+        long wake = intent.getLongExtra(WAKE_EXTRA, -1);
+        int wakeBoot = intent.getIntExtra(WAKE_BOOT_EXTRA, -1);
+        intent.removeExtra(WAKE_EXTRA);
+        intent.removeExtra(WAKE_BOOT_EXTRA);
+        if (wake >= 0 && wakeBoot == bootCount(activity) && wakeReady(activity)
+                && prefs(activity).getInt("wake-boot", -1) == wakeBoot
+                && prefs(activity).getLong("wake-attempted", -1) == wake) {
+            prefs(activity).edit().putLong("wake-confirmed", wake)
+                    .putString("wake-status", "已在亮屏后恢复桌面").commit();
+            Log.i("GuiZangBoot", activity.getPackageName() + " source=system-wake-hook boot="
+                    + wakeBoot + " wake=" + wake + " 已在亮屏后恢复桌面");
+        }
         int boot = intent.getIntExtra(EXTRA, -1);
         if (boot < 0) return;
         intent.removeExtra(EXTRA);
@@ -100,11 +153,12 @@ public final class BootStart {
         }
         String state = prefs(a).getString("status", "尚未进行完整重启测试");
         new AlertDialog.Builder(a).setTitle("开机自动进入（实验）")
-                .setMessage("仅在完整开机后尝试一次，不接管 Home 键，同次开机的后续调用直接跳过。\n\n"
+                .setMessage("完整开机时尝试进入；待机亮屏后，如果系统打开归藏启动入口，也会尝试恢复桌面。不接管 Home 键。\n\n"
                         + "由已适配的小米系统调用启动入口；不需要悬浮窗权限。\n\n"
                         + "系统入口：" + (configured(a) ? "已配置" : "尚未配置，需电脑设置") + "\n上次状态：" + state)
                 .setPositiveButton(enabled(a) ? "关闭自动进入" : "开启自动进入", (d, which) -> {
                     boolean value = !enabled(a);
+                    cancelWake(a);
                     prefs(a).edit().putBoolean("enabled", value).apply();
                     Toast.makeText(a, value ? (configured(a) ? "已开启，下次完整重启时尝试进入" : "开关已开启，还需按项目文档配置系统入口") : "已关闭开机自动进入", Toast.LENGTH_LONG).show();
                 })
@@ -116,5 +170,10 @@ public final class BootStart {
                 + " confirmed=" + prefs(c).getInt("confirmed", -1)
                 + " source=" + prefs(c).getString("source", "none")
                 + " status=" + prefs(c).getString("status", "none"));
+        out.println("WakeStart: boot=" + prefs(c).getInt("wake-boot", -1)
+                + " attempted=" + prefs(c).getLong("wake-attempted", -1)
+                + " confirmed=" + prefs(c).getLong("wake-confirmed", -1)
+                + " source=" + prefs(c).getString("wake-source", "none")
+                + " status=" + prefs(c).getString("wake-status", "none"));
     }
 }

@@ -11,7 +11,7 @@
         <package android:name="com.xiaomi.mitv.tvplayer" />
         <package android:name="com.mitv.tvhome" />
     </queries>
-    <application android:label="@string/app_name" android:icon="@drawable/ic_launcher"
+    <application android:name=".GuiZangApplication" android:label="@string/app_name" android:icon="@drawable/ic_launcher"
         android:banner="@drawable/banner" android:theme="@style/Theme.GuiZangTV"
         android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".FrameHomeActivity" android:exported="true"

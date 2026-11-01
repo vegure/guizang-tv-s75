@@ -1,6 +1,8 @@
 # S75 待机唤醒：证据与候选配置
 
-**2026-11-01：三项组合配置重启后保留超过五分钟，两轮电源键注入短待机通过；长期与 STR 深度待机仍待验证。** 设备为 `MiTV-MFTR0 / Android 14 / OS3.0.106.0.UFTMATV`。当日还取得完整重启和物理断电冷启动自动进入的日志证据，见 [S75 开机说明](S75-BOOT-START.md)；本轮的轮次、包名与证据边界见 [实机记录](changes/2026-11-01-s75-startup-evidence.md)。
+> **后续长待机发现：** boot 26 中进程保活、配置保留后，系统启动页面仍会覆盖归藏，旧 INFO 去重阻止恢复。新的亮屏后入口恢复实现已通过本地测试和 ADB 受控入口对照；真实厂商自动调用、长待机及新包冷启动仍待验。见 [唤醒入口修复](changes/2026-11-01-s75-wake-entry.md)。下文短待机成功不能扩展为长期待机已修复。
+
+**2026-11-01：三项组合配置重启后保留超过五分钟，两轮电源键注入短待机通过；随后真实长待机失败，STR 深度待机仍未验证。** 设备为 `MiTV-MFTR0 / Android 14 / OS3.0.106.0.UFTMATV`。当日还取得完整重启和物理断电冷启动自动进入的日志证据，见 [S75 开机说明](S75-BOOT-START.md)；本轮的轮次、包名与证据边界见 [实机记录](changes/2026-11-01-s75-startup-evidence.md)。
 
 ## 本机已确认的问题
 
@@ -19,6 +21,8 @@
 
 三项组合配置重启到 boot 26 后，又完成两轮电源键注入短待机，睡眠约 47.6 秒和 82.6 秒。两轮均有 `Asleep`、`feature disable` 和唤醒日志，隔离包 PID `1682`、`stopped=false` 保持，唤醒后仍为归藏前台，无障碍关闭。Home 键返回小米原桌面也已核对；两轮待机前从归藏前台开始，不能由此推断其他应用或 HDMI 前台不会被影响。这两轮不是独立的真实遥控器测试。
 
+后续真实长待机在三项配置保留、PID 仍存活时失败：系统启动页面在亮屏后覆盖归藏，INFO 入口又因 boot 26 已尝试而退出。故普通待机保活开关不是完整恢复方案，新的 `.s75wake` 已在相同 OFF→ON→Home→显式 INFO 的 ADB 受控配方下恢复归藏，旧包仍停小米桌面；无新亮屏周期的 Home+INFO 负向未恢复。真实遥控器自动调用仍待验证，不能将受控配方写成厂商自动唤醒成功。
+
 此开关作用于经过该方法的所有第三方应用，待机功耗和其他后台行为尚未测量。STR 的 reason 9 分支和 `killAllThirdAppForStr()` 不经过上述早退，较长待机及 STR 仍需另测。
 
 ## 相似问题的证据边界
@@ -33,7 +37,7 @@ Aerial 的 [RevivalListener](https://github.com/pengchujin/aerial-tv/blob/main/a
 
 ## 配置工具
 
-`scripts/s75_startup.py` 默认只读 `inspect`；不安装、启动或卸载应用，不授予通知/无障碍权限，不禁用系统组件，也不重启电视。把示例地址和包名替换为实际值，隔离包使用 `io.github.op7418.guizangtv.s75test`。
+`scripts/s75_startup.py` 默认只读 `inspect`；不安装、启动或卸载应用，不授予通知/无障碍权限，不禁用系统组件，也不重启电视。把示例地址和包名替换为实际值；早期隔离启动包为 `io.github.op7418.guizangtv.s75test`，新的亮屏恢复验证包为 `io.github.op7418.guizangtv.s75wake`，不得混用配置目标。
 
 ```sh
 python3 scripts/s75_startup.py inspect --serial TV_IP:5555 --package APP_PACKAGE

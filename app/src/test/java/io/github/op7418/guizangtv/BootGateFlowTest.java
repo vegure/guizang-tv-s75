@@ -83,6 +83,224 @@ public class BootGateFlowTest {
         assertEquals(20, prefs.getInt("confirmed", -1));
     }
 
+    @Test public void hookCanWaitForScreenEventsDeliveredAfterItResumes() {
+        completedBoot();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertFalse(gate.get().isFinishing());
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100));
+        assertNotNull(shadowOf(gate.get()).getNextStartedActivity());
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void installingAfterTheBootWindowDoesNotBlockARealWake() {
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", context.getPackageName());
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofHours(3));
+        screenWake();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertNotNull(shadowOf(gate.get()).getNextStartedActivity());
+        assertEquals(-1, prefs.getInt("attempted", -1));
+        assertEquals(-1, prefs.getInt("confirmed", -1));
+        assertTrue(prefs.getLong("wake-attempted", -1) >= 0);
+    }
+
+    @Test public void pausedHookCannotLaunchWhenScreenEventsArriveLater() {
+        completedBoot();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        gate.pause();
+        screenWake();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+        assertEquals(-1, prefs.getLong("wake-attempted", -1));
+    }
+
+    @Test public void screenEventsAloneDoNotOpenAnActivity() {
+        completedBoot();
+        screenWake();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity());
+        assertEquals(-1, prefs.getLong("wake-attempted", -1));
+    }
+
+    @Test public void freshProcessDoesNotRecoverAWakeFromPreferencesOrOnAlone() {
+        completedBoot();
+        prefs.edit().putLong("wake-attempted", 100).putLong("wake-confirmed", 100)
+                .putInt("wake-boot", 20).commit();
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+        assertEquals(100, prefs.getLong("wake-attempted", -1));
+    }
+
+    @Test public void duplicateOnDoesNotExtendTheWakeWindow() {
+        completedBoot();
+        screenWake();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(29));
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void anotherScreenOffCancelsThePendingWake() {
+        completedBoot();
+        screenWake();
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));
+        shadowOf(Looper.getMainLooper()).idle();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void nonInteractiveHookRejectsEvenAnOnBroadcast() {
+        completedBoot();
+        shadowOf((PowerManager) context.getSystemService(Context.POWER_SERVICE)).setIsScreenOn(false);
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        shadowOf(Looper.getMainLooper()).idle();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void duplicateHooksConsumeOneWakeOnlyOnce() {
+        completedBoot();
+        screenWake();
+        ActivityController<BootGateActivity> first = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        assertNotNull(shadowOf(first.get()).getNextStartedActivity());
+        ActivityController<BootGateActivity> duplicate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(duplicate.get()).getNextStartedActivity());
+    }
+
+    @Test public void disablingAutoEntryCancelsAnObservedWake() {
+        completedBoot();
+        screenWake();
+        prefs.edit().putBoolean("enabled", false).commit();
+        ActivityController<BootGateActivity> disabled = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(disabled.get()).getNextStartedActivity());
+        prefs.edit().putBoolean("enabled", true).commit();
+        ActivityController<BootGateActivity> enabledAgain = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(enabledAgain.get()).getNextStartedActivity());
+    }
+
+    @Test public void anotherSystemTargetCancelsAnObservedWake() {
+        completedBoot();
+        screenWake();
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", "another.package");
+        ActivityController<BootGateActivity> otherTarget = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(otherTarget.get()).getNextStartedActivity());
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", context.getPackageName());
+        ActivityController<BootGateActivity> restoredTarget = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(restoredTarget.get()).getNextStartedActivity());
+    }
+
+    @Test public void lockedWakeWaitsForUnlockWithoutChangingBootConfirmation() {
+        completedBoot();
+        screenWake();
+        shadowOf(users).setUserUnlocked(false);
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+        shadowOf(users).setUserUnlocked(true);
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(300));
+        assertNotNull(shadowOf(gate.get()).getNextStartedActivity());
+        assertEquals(20, prefs.getInt("attempted", -1));
+        assertEquals(20, prefs.getInt("confirmed", -1));
+    }
+
+    @Test public void expiredWakeCannotLaunchAfterUnlock() {
+        completedBoot();
+        screenWake();
+        shadowOf(users).setUserUnlocked(false);
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(31));
+        shadowOf(users).setUserUnlocked(true);
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(300));
+        assertTrue(gate.get().isFinishing());
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void lateScreenEventsCannotReopenAFinishedHook() {
+        completedBoot();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertTrue(gate.get().isFinishing());
+        screenWake();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(gate.get()).getNextStartedActivity());
+    }
+
+    @Test public void fullBootClaimWinsOverAnObservedWake() {
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", context.getPackageName());
+        screenWake();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        Intent bootRequest = shadowOf(gate.get()).getNextStartedActivity();
+        assertNotNull(bootRequest);
+        assertEquals(20, bootRequest.getIntExtra("guizang.boot-count", -1));
+        assertEquals(-1, prefs.getLong("wake-attempted", -1));
+        ActivityController<BootGateActivity> duplicate = hook();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+        assertNull(shadowOf(duplicate.get()).getNextStartedActivity());
+    }
+
+    @Test public void reusedHomeConfirmsWakeOnlyAfterNewIntentAndResume() {
+        completedBoot();
+        prefs.edit().putString("source", "boot-source").putString("status", "boot-status").commit();
+        ActivityController<FrameHomeActivity> home = Robolectric.buildActivity(FrameHomeActivity.class)
+                .create().start().resume();
+        home.pause();
+        screenWake();
+        ActivityController<BootGateActivity> gate = hook();
+        shadowOf(Looper.getMainLooper()).idle();
+        Intent request = shadowOf(gate.get()).getNextStartedActivity();
+        assertNotNull(request);
+        long wake = prefs.getLong("wake-attempted", -1);
+        assertTrue(wake >= 0);
+        assertEquals(-1, prefs.getLong("wake-confirmed", -1));
+        home.newIntent(request);
+        assertEquals(-1, prefs.getLong("wake-confirmed", -1));
+        home.resume();
+        assertEquals(wake, prefs.getLong("wake-confirmed", -1));
+        assertEquals(20, prefs.getInt("attempted", -1));
+        assertEquals(20, prefs.getInt("confirmed", -1));
+        assertEquals("boot-source", prefs.getString("source", ""));
+        assertEquals("boot-status", prefs.getString("status", ""));
+        home.pause().stop().destroy();
+    }
+
+    private void completedBoot() {
+        prefs.edit().putInt("attempted", 20).putInt("confirmed", 20).commit();
+        Settings.System.putString(context.getContentResolver(), "start_3rd_app", context.getPackageName());
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofHours(3));
+    }
+
+    private ActivityController<BootGateActivity> hook() {
+        return Robolectric.buildActivity(BootGateActivity.class).create().start().resume();
+    }
+
+    private void screenWake() {
+        PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        shadowOf(power).setIsScreenOn(false);
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_OFF));
+        shadowOf(Looper.getMainLooper()).idle();
+        shadowOf(power).setIsScreenOn(true);
+        context.sendBroadcast(new Intent(Intent.ACTION_SCREEN_ON));
+        shadowOf(Looper.getMainLooper()).idle();
+    }
+
     @Test public void credentialOnlyUpgradeWaitsForUnlockBeforeReadingChoice() {
         prefs.edit().clear().commit();
         context.getSharedPreferences("boot-start", Context.MODE_PRIVATE).edit()
